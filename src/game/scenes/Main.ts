@@ -22,6 +22,8 @@ export class Main extends Phaser.Scene {
   isMouseDown: boolean;
   useMouse: boolean;
   useKeyboard: boolean;
+  useGamepad: boolean;
+  gamepad!: Phaser.Input.Gamepad.Gamepad | null;
 
   constructor() {
     super("Main");
@@ -34,6 +36,8 @@ export class Main extends Phaser.Scene {
     this.isMouseDown = false;
     this.useMouse = true;
     this.useKeyboard = false;
+    this.useGamepad = false;
+    this.gamepad = null;
   }
 
   preload() {
@@ -60,19 +64,36 @@ export class Main extends Phaser.Scene {
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       this.pointer = pointer;
-      this.useKeyboard = false;
-      this.useMouse = true;
+      if (!this.useMouse) {
+        this.useMouse = true;
+        this.useKeyboard = false;
+        this.useGamepad = false;
+      }
     });
 
     this.input.on("pointerdown", () => {
       this.isMouseDown = true;
-      this.useKeyboard = false;
-      this.useMouse = true;
+      if (!this.useMouse) {
+        this.useMouse = true;
+        this.useKeyboard = false;
+        this.useGamepad = false;
+      }
     });
 
     this.input.on("pointerup", () => {
       this.isMouseDown = false;
     });
+
+    this.input.gamepad?.once(
+      Phaser.Input.Gamepad.Events.CONNECTED,
+      (pad: Phaser.Input.Gamepad.Gamepad) => {
+        this.gamepad = pad;
+        this.useGamepad = true;
+        this.useMouse = false;
+        this.useKeyboard = false;
+        console.log("Gamepad connected:", pad);
+      }
+    );
 
     EventBus.emit("current-scene-ready", this);
   }
@@ -91,6 +112,7 @@ export class Main extends Phaser.Scene {
     ) {
       this.useKeyboard = true;
       this.useMouse = false;
+      this.useGamepad = false;
     }
 
     // Update player rotation with keyboard if enabled
@@ -111,6 +133,19 @@ export class Main extends Phaser.Scene {
       if (this.cursors.down?.isDown || this.wasd.down.isDown) {
         this.playerVelocityX -= Math.cos(this.playerRotation) * this.thrust;
         this.playerVelocityY -= Math.sin(this.playerRotation) * this.thrust;
+      }
+    }
+
+    // Apply force and update rotation based on gamepad left stick direction if enabled
+    if (this.useGamepad && this.gamepad) {
+      const leftStickX = this.gamepad.leftStick.x;
+      const leftStickY = this.gamepad.leftStick.y;
+
+      if (leftStickX !== 0 || leftStickY !== 0) {
+        const angle = Math.atan2(leftStickY, leftStickX);
+        this.playerRotation = angle;
+        this.playerVelocityX += Math.cos(angle) * this.thrust;
+        this.playerVelocityY += Math.sin(angle) * this.thrust;
       }
     }
 
@@ -149,7 +184,7 @@ export class Main extends Phaser.Scene {
     const radius = 20;
 
     // Draw the player as a circle
-    this.player.fillStyle(0xffffff, 1);
+    this.player.fillStyle(0x00ff00, 1);
     this.player.beginPath();
     this.player.arc(x, y, radius, 0, Math.PI * 2, false);
     this.player.fillPath();

@@ -1,8 +1,69 @@
 import Phaser from "phaser";
 import { EventBus } from "../EventBus";
 
+class Player {
+  sprite: Phaser.Physics.Arcade.Sprite;
+  graphics: Phaser.GameObjects.Graphics;
+  rotation: number;
+  thrust: number;
+  scene: Phaser.Scene;
+  radius: number;
+
+  constructor(scene: Phaser.Scene, x: number, y: number) {
+    this.scene = scene;
+    this.sprite = scene.physics.add.sprite(x, y, ""); // Use an empty string as there is no asset for the sprite
+    this.sprite.setCircle(20); // Set the circle shape for the sprite
+    this.sprite.setCollideWorldBounds(true);
+    this.graphics = scene.add.graphics(); // Add a graphics object for custom drawing
+    this.rotation = 0; // Initial rotation angle in radians
+    this.thrust = 10;
+    this.radius = 40;
+  }
+
+  updateVelocity(angle: number, thrust: number) {
+    this.sprite.setVelocity(
+      this.sprite.body!.velocity.x + Math.cos(angle) * thrust,
+      this.sprite.body!.velocity.y + Math.sin(angle) * thrust
+    );
+  }
+
+  draw() {
+    const { x, y } = this.sprite;
+
+    this.graphics.clear(); // Clear previous drawings
+
+    // Draw the green circle
+    this.graphics.fillStyle(0x00ff00, 0);
+    this.graphics.beginPath();
+    this.graphics.arc(x, y, this.radius, 0, Math.PI * 2, false);
+    this.graphics.fillPath();
+
+    // Draw the direction line
+    const lineLength = 30;
+    this.graphics.lineStyle(2, 0x0000ff, 1);
+    this.graphics.beginPath();
+    this.graphics.moveTo(x, y);
+    this.graphics.lineTo(
+      x + Math.cos(this.rotation) * lineLength,
+      y + Math.sin(this.rotation) * lineLength
+    );
+    this.graphics.strokePath();
+
+    // Draw the velocity line
+    this.graphics.lineStyle(2, 0xff0000, 1);
+    this.graphics.beginPath();
+    this.graphics.moveTo(x, y);
+    this.graphics.lineTo(
+      x + this.sprite.body!.velocity.x * 0.1,
+      y + this.sprite.body!.velocity.y * 0.1
+    );
+    this.graphics.strokePath();
+  }
+}
+
 export class Main extends Phaser.Scene {
-  player!: Phaser.GameObjects.Graphics;
+  player!: Player;
+  gridGraphics!: Phaser.GameObjects.Graphics;
   cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   wasd!: {
     up: Phaser.Input.Keyboard.Key;
@@ -11,28 +72,16 @@ export class Main extends Phaser.Scene {
     right: Phaser.Input.Keyboard.Key;
   };
   camera!: Phaser.Cameras.Scene2D.Camera;
-  background!: Phaser.GameObjects.Graphics;
-  playerX: number;
-  playerY: number;
-  playerVelocityX: number;
-  playerVelocityY: number;
-  playerRotation: number;
-  thrust: number;
   pointer!: Phaser.Input.Pointer;
   isMouseDown: boolean;
   useMouse: boolean;
   useKeyboard: boolean;
   useGamepad: boolean;
   gamepad!: Phaser.Input.Gamepad.Gamepad | null;
+  asteroids!: Phaser.Physics.Arcade.Group;
 
   constructor() {
     super("Main");
-    this.playerX = 400;
-    this.playerY = 300;
-    this.playerVelocityX = 0;
-    this.playerVelocityY = 0;
-    this.playerRotation = 0; // Initial rotation angle in radians
-    this.thrust = 0.1;
     this.isMouseDown = false;
     this.useMouse = true;
     this.useKeyboard = false;
@@ -46,11 +95,36 @@ export class Main extends Phaser.Scene {
 
   create() {
     this.camera = this.cameras.main;
-    this.camera.setBackgroundColor(0x000000);
+    this.camera.setBounds(0, 0, 5000, 5000);
+    this.physics.world.setBounds(0, 0, 5000, 5000);
 
-    // Draw the player as a circle
-    this.player = this.add.graphics();
-    this.drawPlayer(this.playerX, this.playerY);
+    // Draw the grid
+    this.gridGraphics = this.add.graphics();
+    this.drawGrid();
+
+    // Create the player
+    this.player = new Player(this, 2500, 2500);
+
+    // Enable camera follow
+    this.cameras.main.startFollow(this.player.sprite, true, 0.1, 0.1);
+
+    this.asteroids = this.physics.add.group({
+      key: "asteroid",
+      repeat: 100,
+      setXY: { x: 2500, y: 2500, stepX: 50, stepY: 50 },
+    });
+
+    this.asteroids.children.iterate(
+      (asteroid: Phaser.GameObjects.GameObject) => {
+        const sprite = asteroid as Phaser.Physics.Arcade.Sprite;
+
+        sprite.setCircle(20);
+        sprite.setVelocity(Math.random() * 100 - 50, Math.random() * 100 - 50);
+        sprite.setBounce(1, 1);
+        sprite.setCollideWorldBounds(true);
+        return true;
+      }
+    );
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = {
@@ -115,100 +189,72 @@ export class Main extends Phaser.Scene {
       this.useGamepad = false;
     }
 
-    // Update player rotation with keyboard if enabled
+    // Update player rotation and thrust with keyboard if enabled
     if (this.useKeyboard) {
       if (this.cursors.left?.isDown || this.wasd.left.isDown) {
-        this.playerRotation -= 0.05; // Rotate counterclockwise
+        this.player.rotation -= 0.05; // Rotate counterclockwise
       } else if (this.cursors.right?.isDown || this.wasd.right.isDown) {
-        this.playerRotation += 0.05; // Rotate clockwise
+        this.player.rotation += 0.05; // Rotate clockwise
       }
 
-      // Apply thrust with keyboard
       if (this.cursors.up?.isDown || this.wasd.up.isDown) {
-        this.playerVelocityX += Math.cos(this.playerRotation) * this.thrust;
-        this.playerVelocityY += Math.sin(this.playerRotation) * this.thrust;
+        this.player.updateVelocity(this.player.rotation, this.player.thrust);
       }
 
-      // Apply reverse thrust with keyboard
       if (this.cursors.down?.isDown || this.wasd.down.isDown) {
-        this.playerVelocityX -= Math.cos(this.playerRotation) * this.thrust;
-        this.playerVelocityY -= Math.sin(this.playerRotation) * this.thrust;
+        this.player.updateVelocity(
+          this.player.rotation + Math.PI,
+          this.player.thrust
+        );
       }
     }
 
     // Apply force and update rotation based on gamepad left stick direction if enabled
     if (this.useGamepad && this.gamepad) {
-      const leftStickX = this.gamepad.leftStick.x;
-      const leftStickY = this.gamepad.leftStick.y;
+      const leftStickX = this.gamepad.leftStick?.x || 0;
+      const leftStickY = this.gamepad.leftStick?.y || 0;
 
       if (leftStickX !== 0 || leftStickY !== 0) {
         const angle = Math.atan2(leftStickY, leftStickX);
-        this.playerRotation = angle;
-        this.playerVelocityX += Math.cos(angle) * this.thrust;
-        this.playerVelocityY += Math.sin(angle) * this.thrust;
+        this.player.rotation = angle;
+        this.player.updateVelocity(angle, this.player.thrust);
       }
     }
 
     // Update player rotation with mouse if enabled
     if (this.useMouse) {
       const angleToPointer = Phaser.Math.Angle.Between(
-        this.playerX,
-        this.playerY,
+        this.player.sprite.x,
+        this.player.sprite.y,
         this.pointer.worldX,
         this.pointer.worldY
       );
-      this.playerRotation = angleToPointer;
+      this.player.rotation = angleToPointer;
 
       // Apply thrust with mouse click
       if (this.isMouseDown) {
-        this.playerVelocityX += Math.cos(this.playerRotation) * this.thrust;
-        this.playerVelocityY += Math.sin(this.playerRotation) * this.thrust;
+        this.player.updateVelocity(this.player.rotation, this.player.thrust);
       }
     }
 
-    // Update player position
-    this.playerX += this.playerVelocityX;
-    this.playerY += this.playerVelocityY;
-
-    // Wrap around screen edges
-    if (this.playerX < 0) this.playerX = this.scale.width;
-    if (this.playerX > this.scale.width) this.playerX = 0;
-    if (this.playerY < 0) this.playerY = this.scale.height;
-    if (this.playerY > this.scale.height) this.playerY = 0;
-
-    this.player.clear();
-    this.drawPlayer(this.playerX, this.playerY);
+    this.player.draw();
   }
 
-  drawPlayer(x: number, y: number) {
-    const radius = 20;
+  drawGrid() {
+    const gridSize = 100;
+    this.gridGraphics.lineStyle(1, 0x888888, 1);
 
-    // Draw the player as a circle
-    this.player.fillStyle(0x00ff00, 1);
-    this.player.beginPath();
-    this.player.arc(x, y, radius, 0, Math.PI * 2, false);
-    this.player.fillPath();
+    for (let x = 0; x < 5000; x += gridSize) {
+      this.gridGraphics.moveTo(x, 0);
+      this.gridGraphics.lineTo(x, 5000);
+    }
 
-    // Draw the direction line
-    const lineLength = 30;
-    this.player.lineStyle(2, 0x0000ff, 1);
-    this.player.beginPath();
-    this.player.moveTo(x, y);
-    this.player.lineTo(
-      x + Math.cos(this.playerRotation) * lineLength,
-      y + Math.sin(this.playerRotation) * lineLength
-    );
-    this.player.strokePath();
+    for (let y = 0; y < 5000; y += gridSize) {
+      this.gridGraphics.moveTo(0, y);
+      this.gridGraphics.lineTo(5000, y);
+    }
 
-    // Draw the velocity line
-    this.player.lineStyle(2, 0xff0000, 1);
-    this.player.beginPath();
-    this.player.moveTo(x, y);
-    this.player.lineTo(
-      x + this.playerVelocityX * 10,
-      y + this.playerVelocityY * 10
-    );
-    this.player.strokePath();
+    this.gridGraphics.strokePath();
   }
 
   changeScene() {
